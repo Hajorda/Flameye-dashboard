@@ -48,24 +48,25 @@ async def save_alert_atomically(
     cv2.imwrite(str(tmp_path), annotated_frame)
 
     try:
-        async with db.transaction():
-            row = await db.fetchrow(
-                """
-                INSERT INTO alerts
-                    (camera_id, confidence, image_filename, bbox_x, bbox_y, bbox_w, bbox_h, class_name, detected_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                RETURNING id, detected_at
-                """,
-                camera_id,
-                confidence,
-                final_name,
-                bbox[0],
-                bbox[1],
-                bbox[2] - bbox[0],  # width
-                bbox[3] - bbox[1],  # height
-                class_name,
-                ts,
-            )
+        async with db.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO alerts
+                        (camera_id, confidence, image_filename, bbox_x, bbox_y, bbox_w, bbox_h, class_name, detected_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    RETURNING id, detected_at
+                    """,
+                    camera_id,
+                    confidence,
+                    final_name,
+                    bbox[0],
+                    bbox[1],
+                    bbox[2] - bbox[0],
+                    bbox[3] - bbox[1],
+                    class_name,
+                    ts,
+                )
 
         tmp_path.rename(final_path)
         logger.info("Alert saved — id=%s file=%s", row["id"], final_name)
