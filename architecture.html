@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Flameye — System Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0f1117;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    padding: 40px;
+  }
+  .poster {
+    width: 1200px;
+    background: #13151f;
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+    padding: 48px;
+    box-shadow: 0 40px 120px rgba(0,0,0,0.6);
+  }
+  .header {
+    text-align: center;
+    margin-bottom: 44px;
+  }
+  .header h1 {
+    font-size: 32px;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: -0.5px;
+  }
+  .header h1 span { color: #f47b25; }
+  .header p {
+    margin-top: 8px;
+    font-size: 13px;
+    color: rgba(255,255,255,0.4);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  /* ── grid ── */
+  .grid {
+    display: grid;
+    grid-template-columns: 220px 1fr 220px;
+    grid-template-rows: auto auto auto;
+    gap: 20px;
+    align-items: start;
+  }
+
+  /* ── cards ── */
+  .card {
+    border-radius: 14px;
+    padding: 18px 20px;
+    border: 1px solid rgba(255,255,255,0.07);
+    position: relative;
+  }
+  .card-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin-bottom: 12px;
+    opacity: 0.5;
+  }
+  .card-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .card-sub {
+    font-size: 11px;
+    color: rgba(255,255,255,0.35);
+    line-height: 1.6;
+  }
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 600;
+    margin: 3px 2px 0 0;
+  }
+
+  /* colours */
+  .bg-orange  { background: rgba(244,123,37,0.12); border-color: rgba(244,123,37,0.3); }
+  .bg-blue    { background: rgba(59,130,246,0.10); border-color: rgba(59,130,246,0.3); }
+  .bg-purple  { background: rgba(168,85,247,0.10); border-color: rgba(168,85,247,0.3); }
+  .bg-green   { background: rgba(34,197,94,0.10);  border-color: rgba(34,197,94,0.3);  }
+  .bg-red     { background: rgba(239,68,68,0.10);  border-color: rgba(239,68,68,0.3);  }
+  .bg-teal    { background: rgba(20,184,166,0.10); border-color: rgba(20,184,166,0.3); }
+  .bg-yellow  { background: rgba(234,179,8,0.10);  border-color: rgba(234,179,8,0.3);  }
+  .bg-gray    { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.08); }
+
+  .dot-orange { background:#f47b25; }
+  .dot-blue   { background:#3b82f6; }
+  .dot-purple { background:#a855f7; }
+  .dot-green  { background:#22c55e; }
+  .dot-red    { background:#ef4444; }
+  .dot-teal   { background:#14b8a6; }
+  .dot-yellow { background:#eab308; }
+
+  .tag-orange { background:rgba(244,123,37,0.2); color:#f97316; }
+  .tag-blue   { background:rgba(59,130,246,0.2); color:#60a5fa; }
+  .tag-purple { background:rgba(168,85,247,0.2); color:#c084fc; }
+  .tag-green  { background:rgba(34,197,94,0.2);  color:#4ade80; }
+  .tag-teal   { background:rgba(20,184,166,0.2); color:#2dd4bf; }
+  .tag-yellow { background:rgba(234,179,8,0.2);  color:#facc15; }
+  .tag-red    { background:rgba(239,68,68,0.2);  color:#f87171; }
+
+  /* ── icon dot ── */
+  .icon-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  /* ── section label ── */
+  .section-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: rgba(255,255,255,0.2);
+    margin-bottom: 10px;
+    padding-left: 2px;
+  }
+
+  /* ── arrow SVG ── */
+  .arrows-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+  }
+
+  /* ── middle pipeline column ── */
+  .pipeline {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .pipeline-row {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .pipe-card {
+    flex: 1;
+    border-radius: 14px;
+    padding: 16px 18px;
+    border: 1px solid rgba(255,255,255,0.07);
+  }
+  .pipe-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.2);
+    font-size: 18px;
+    padding: 0 4px;
+    flex-shrink: 0;
+  }
+
+  /* ── left/right columns ── */
+  .side-col {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* ── data flow arrows between sections ── */
+  .flow-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin: 4px 0;
+  }
+  .flow-line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+    position: relative;
+  }
+  .flow-label {
+    font-size: 10px;
+    color: rgba(255,255,255,0.25);
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    background: #13151f;
+    padding: 2px 10px;
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  /* ── full-width middle band ── */
+  .full-row {
+    grid-column: 1 / -1;
+  }
+  .band {
+    border-radius: 14px;
+    padding: 20px 24px;
+    border: 1px solid rgba(255,255,255,0.07);
+    display: flex;
+    align-items: center;
+    gap: 0;
+  }
+  .band-section {
+    flex: 1;
+    padding: 0 20px;
+    border-right: 1px solid rgba(255,255,255,0.07);
+  }
+  .band-section:first-child { padding-left: 0; }
+  .band-section:last-child  { padding-right: 0; border-right: none; }
+  .band-section-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .band-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    margin: 3px 3px 0 0;
+  }
+
+  /* ── footer ── */
+  .footer {
+    margin-top: 36px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 20px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  .footer-left { font-size: 13px; color: rgba(255,255,255,0.35); }
+  .footer-left strong { color: rgba(255,255,255,0.7); }
+  .legend {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.35);
+  }
+  .legend-line {
+    width: 24px;
+    height: 2px;
+    border-radius: 1px;
+  }
+  .legend-line-dashed {
+    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.3) 0, rgba(255,255,255,0.3) 4px, transparent 4px, transparent 8px);
+  }
+</style>
+</head>
+<body>
+<div class="poster">
+
+  <!-- HEADER -->
+  <div class="header">
+    <h1>🔥 <span>Flameye</span> — AI Wildfire Detection & Intelligence System</h1>
+    <p>Senior Capstone Project &nbsp;·&nbsp; Ali Bolat &nbsp;·&nbsp; System Architecture</p>
+  </div>
+
+  <!-- ROW 1: Inputs → Pipeline → Storage -->
+  <div class="grid">
+
+    <!-- LEFT: Camera Inputs -->
+    <div class="side-col">
+      <div class="section-label">📷 Live Inputs</div>
+
+      <div class="card bg-orange">
+        <div class="card-title">Camera Agent</div>
+        <div class="card-name">Stream Capture</div>
+        <div class="card-sub" style="margin-top:8px">
+          <span class="tag tag-orange">RTSP</span>
+          <span class="tag tag-orange">YouTube</span>
+          <span class="tag tag-orange">OpenCV</span>
+          <span class="tag tag-orange">yt-dlp</span>
+        </div>
+        <div class="card-sub" style="margin-top:10px">One thread per camera · JPEG frames → Redis Stream · heartbeat every 5s</div>
+      </div>
+
+      <div class="card bg-gray">
+        <div class="card-title">Supported Streams</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-orange"></span>RTSP IP cameras
+          </div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-blue"></span>YouTube live streams
+          </div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-green"></span>ALERTWildfire feeds
+          </div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-purple"></span>HPWREN cameras
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MIDDLE: Core Pipeline -->
+    <div class="pipeline">
+      <div class="section-label" style="text-align:center">⚙️ Detection Pipeline</div>
+
+      <!-- Row 1: Redis → Inference -->
+      <div class="pipeline-row">
+        <div class="pipe-card bg-red" style="max-width:160px;flex:0 0 160px">
+          <div class="card-title">Message Broker</div>
+          <div class="card-name">Redis 7</div>
+          <div style="margin-top:8px">
+            <span class="tag tag-red">Streams</span>
+            <span class="tag tag-red">Pub/Sub</span>
+          </div>
+          <div class="card-sub" style="margin-top:8px">frames:{id} stream · alerts channel · camera_status channel</div>
+        </div>
+
+        <div class="pipe-arrow">→</div>
+
+        <div class="pipe-card bg-purple">
+          <div class="card-title">Inference Worker</div>
+          <div class="card-name">YOLOv8 Detection</div>
+          <div style="margin-top:8px">
+            <span class="tag tag-purple">PyTorch</span>
+            <span class="tag tag-purple">asyncio</span>
+          </div>
+          <div class="card-sub" style="margin-top:8px">
+            One task per camera · Motion gate · 3-in-5 confirmation buffer · 10 min cooldown
+          </div>
+        </div>
+      </div>
+
+      <!-- Arrow down -->
+      <div style="display:flex;justify-content:center">
+        <svg width="200" height="28" viewBox="0 0 200 28">
+          <defs>
+            <marker id="arr" markerWidth="8" markerHeight="6" refX="6" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="rgba(255,255,255,0.2)"/>
+            </marker>
+          </defs>
+          <line x1="100" y1="2" x2="100" y2="22" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+          <text x="110" y="16" fill="rgba(255,255,255,0.25)" font-size="9" font-family="system-ui">alert detected</text>
+        </svg>
+      </div>
+
+      <!-- Row 2: API Server -->
+      <div class="pipe-card bg-blue" style="width:100%">
+        <div class="card-title">API Server (FastAPI + asyncpg)</div>
+        <div style="display:flex;gap:20px;align-items:flex-start">
+          <div>
+            <div class="card-name">REST API &amp; WebSocket</div>
+            <div style="margin-top:8px">
+              <span class="tag tag-blue">FastAPI</span>
+              <span class="tag tag-blue">asyncpg</span>
+              <span class="tag tag-blue">WebSocket</span>
+              <span class="tag tag-blue">aioredis</span>
+            </div>
+          </div>
+          <div style="width:1px;background:rgba(255,255,255,0.08);align-self:stretch;margin:0 4px"></div>
+          <div class="card-sub" style="font-size:11px;color:rgba(255,255,255,0.4);line-height:1.8">
+            25+ REST endpoints &nbsp;·&nbsp; Real-time WebSocket push<br>
+            Background: FIRMS poller (10 min) &nbsp;·&nbsp; Redis listener
+          </div>
+        </div>
+      </div>
+
+      <!-- Arrow down -->
+      <div style="display:flex;justify-content:center">
+        <svg width="200" height="28" viewBox="0 0 200 28">
+          <defs>
+            <marker id="arr2" markerWidth="8" markerHeight="6" refX="6" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="rgba(255,255,255,0.2)"/>
+            </marker>
+          </defs>
+          <line x1="100" y1="2" x2="100" y2="22" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arr2)"/>
+          <text x="110" y="16" fill="rgba(255,255,255,0.25)" font-size="9" font-family="system-ui">HTTP + WS</text>
+        </svg>
+      </div>
+
+      <!-- Row 3: Dashboard -->
+      <div class="pipe-card bg-green" style="width:100%">
+        <div class="card-title">Dashboard (React 18 + TypeScript + Vite)</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <div>
+            <div class="card-name">Operator Interface</div>
+            <div style="margin-top:8px">
+              <span class="tag tag-green">react-leaflet</span>
+              <span class="tag tag-green">Chart.js</span>
+              <span class="tag tag-green">Tailwind CSS</span>
+              <span class="tag tag-green">WebSocket</span>
+            </div>
+          </div>
+          <div style="width:1px;background:rgba(255,255,255,0.08);align-self:stretch"></div>
+          <div class="card-sub" style="font-size:11px;color:rgba(255,255,255,0.4);line-height:1.8">
+            Live GIS map · Fire spread rings · FIRMS hotspots<br>
+            Incident management · Camera feeds · Reports
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Storage -->
+    <div class="side-col">
+      <div class="section-label">🗄️ Data Layer</div>
+
+      <div class="card bg-teal">
+        <div class="card-title">PostgreSQL 16</div>
+        <div class="card-name">Primary Store</div>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:5px">
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-orange"></span>alerts
+          </div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-blue"></span>cameras
+          </div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-red"></span>incidents
+          </div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-green"></span>alert_notes
+          </div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-orange"></span>fire_perimeters
+          </div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-purple"></span>satellite_hotspots
+          </div>
+        </div>
+      </div>
+
+      <div class="card bg-red">
+        <div class="card-title">Redis 7</div>
+        <div class="card-name">Cache &amp; Broker</div>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:5px">
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-red"></span>frames:{id} streams
+          </div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-red"></span>alerts pub/sub
+          </div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-red"></span>geo cache 24h TTL
+          </div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+            <span class="icon-dot dot-red"></span>camera status keys
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /grid -->
+
+  <!-- FULL-WIDTH BAND: Intelligence Layer -->
+  <div style="margin-top:20px">
+    <div class="section-label" style="text-align:center;margin-bottom:12px">🌍 Intelligence &amp; External Services</div>
+    <div class="band" style="background:rgba(255,255,255,0.02);border-color:rgba(255,255,255,0.07)">
+
+      <div class="band-section">
+        <div class="band-section-title" style="color:#f97316">🔥 Fire Spread Model</div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div class="band-chip" style="background:rgba(244,123,37,0.12);color:#f97316">
+            <span>📐</span> Rothermel (1972)
+          </div>
+          <div class="band-chip" style="background:rgba(244,123,37,0.08);color:#fb923c;font-size:10px">
+            Wind + Slope + Fuel → ROS
+          </div>
+          <div class="band-chip" style="background:rgba(244,123,37,0.08);color:#fb923c;font-size:10px">
+            72 bearing directions · 30/60/120 min rings
+          </div>
+          <div class="band-chip" style="background:rgba(244,123,37,0.08);color:#fb923c;font-size:10px">
+            Scott-Burgan 40 fuel models
+          </div>
+        </div>
+      </div>
+
+      <div class="band-section">
+        <div class="band-section-title" style="color:#60a5fa">🌍 Terrain Data</div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div class="band-chip" style="background:rgba(59,130,246,0.12);color:#60a5fa">
+            <span>⛰️</span> OpenTopoData SRTM 30m
+          </div>
+          <div class="band-chip" style="background:rgba(59,130,246,0.08);color:#93c5fd;font-size:10px">
+            Elevation · Slope ° · Aspect bearing
+          </div>
+          <div class="band-chip" style="background:rgba(59,130,246,0.12);color:#60a5fa">
+            <span>🌿</span> LANDFIRE FBFM40 WMS
+          </div>
+          <div class="band-chip" style="background:rgba(59,130,246,0.08);color:#93c5fd;font-size:10px">
+            Fuel map tile overlay (CONUS)
+          </div>
+        </div>
+      </div>
+
+      <div class="band-section">
+        <div class="band-section-title" style="color:#c084fc">🛰️ Satellite</div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div class="band-chip" style="background:rgba(168,85,247,0.12);color:#c084fc">
+            <span>🛸</span> NASA FIRMS VIIRS
+          </div>
+          <div class="band-chip" style="background:rgba(168,85,247,0.08);color:#d8b4fe;font-size:10px">
+            Poll every 10 min
+          </div>
+          <div class="band-chip" style="background:rgba(168,85,247,0.08);color:#d8b4fe;font-size:10px">
+            Cross-ref within 10 km of alerts
+          </div>
+          <div class="band-chip" style="background:rgba(168,85,247,0.08);color:#d8b4fe;font-size:10px">
+            FRP (MW) · confidence · location
+          </div>
+        </div>
+      </div>
+
+      <div class="band-section">
+        <div class="band-section-title" style="color:#4ade80">🌤️ Weather &amp; Alerts</div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div class="band-chip" style="background:rgba(34,197,94,0.12);color:#4ade80">
+            <span>🌬️</span> OpenWeatherMap
+          </div>
+          <div class="band-chip" style="background:rgba(34,197,94,0.08);color:#86efac;font-size:10px">
+            Wind · Temp · Humidity · Risk score
+          </div>
+          <div class="band-chip" style="background:rgba(34,197,94,0.12);color:#4ade80">
+            <span>📱</span> Telegram Bot
+          </div>
+          <div class="band-chip" style="background:rgba(34,197,94,0.08);color:#86efac;font-size:10px">
+            Annotated image + confidence push
+          </div>
+        </div>
+      </div>
+
+      <div class="band-section" style="border-right:none">
+        <div class="band-section-title" style="color:#2dd4bf">🔗 Incident Clustering</div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div class="band-chip" style="background:rgba(20,184,166,0.12);color:#2dd4bf">
+            <span>📍</span> Haversine SQL
+          </div>
+          <div class="band-chip" style="background:rgba(20,184,166,0.08);color:#5eead4;font-size:10px">
+            5 km radius · 2 hr window
+          </div>
+          <div class="band-chip" style="background:rgba(20,184,166,0.08);color:#5eead4;font-size:10px">
+            Multi-camera → single incident
+          </div>
+          <div class="band-chip" style="background:rgba(20,184,166,0.08);color:#5eead4;font-size:10px">
+            No PostGIS required
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <div class="footer-left">
+      <strong>Flameye AI</strong> — Senior Capstone Project &nbsp;·&nbsp; Ali Bolat &nbsp;·&nbsp; 2025
+    </div>
+    <div class="legend">
+      <div class="legend-item">
+        <svg width="24" height="12"><line x1="0" y1="6" x2="24" y2="6" stroke="rgba(255,255,255,0.4)" stroke-width="2"/><polygon points="18,3 24,6 18,9" fill="rgba(255,255,255,0.4)"/></svg>
+        Data flow
+      </div>
+      <div class="legend-item">
+        <svg width="24" height="12"><line x1="0" y1="6" x2="24" y2="6" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-dasharray="4 3"/></svg>
+        Async / event-driven
+      </div>
+      <div class="legend-item">
+        <span class="icon-dot dot-orange" style="width:10px;height:10px"></span>
+        Python service
+      </div>
+      <div class="legend-item">
+        <span class="icon-dot dot-green" style="width:10px;height:10px"></span>
+        React frontend
+      </div>
+      <div class="legend-item">
+        <span class="icon-dot dot-purple" style="width:10px;height:10px"></span>
+        External API
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
