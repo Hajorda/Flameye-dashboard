@@ -1,5 +1,9 @@
 # Flameye — AI-Powered Wildfire Detection & Intelligence System
 
+<p align="center">
+  <img src="logo.jpeg" alt="Flameye Logo" width="180" />
+</p>
+
 > **Senior Capstone Project** — Ali Bolat
 
 Flameye is a real-time wildfire detection and situational awareness platform. It ingests live camera streams, runs a YOLOv8-based fire/smoke detection model on every frame, and presents detected events on an interactive GIS dashboard with physics-based fire spread prediction, NASA satellite cross-referencing, and multi-camera incident clustering.
