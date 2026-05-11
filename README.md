@@ -1,7 +1,7 @@
 # Flameye — AI-Powered Wildfire Detection & Intelligence System
 
 <p align="center">
-  <img src="logo.jpeg" alt="Flameye Logo" width="180" />
+  <img src="logo.jpeg" alt="Flameye Logo" width="100" />
 </p>
 
 > **Senior Capstone Project** — Ali Bolat
