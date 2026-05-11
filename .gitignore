@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Models — never commit weights
+services/inference_worker/models/*.pt
+services/inference_worker/models/*.onnx
+
+# Runtime images — mounted as Docker volume
+images/*
+!images/.gitkeep
+
+# Secrets
+.env
+
+# Node
+node_modules/
+services/dashboard/dist/
+
+# macOS
+.DS_Store
+
+# Docker
+*.log

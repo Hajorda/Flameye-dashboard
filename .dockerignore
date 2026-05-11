@@ -1,0 +1,11 @@
+.git
+.env
+*.md
+__pycache__
+*.pyc
+.pytest_cache
+node_modules
+dist
+.venv
+models/*.pt
+models/*.onnx
