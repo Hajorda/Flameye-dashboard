@@ -1,14 +1,17 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   MapContainer,
   TileLayer,
+  WMSTileLayer,
   Marker,
   Popup,
   CircleMarker,
   Polygon,
   Polyline,
+  Tooltip,
   useMapEvents,
+  useMap,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -17,7 +20,7 @@ import { useAlerts } from "../hooks/useAlerts";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { api } from "../lib/api";
 import { getSeverity, SEVERITY_COLOR, SEVERITY_ICON, SEVERITY_LABEL } from "../lib/severity";
-import type { Alert, Camera, WeatherData } from "../types";
+import type { Alert, Camera } from "../types";
 
 // Fix Leaflet icon paths broken by Vite
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
@@ -43,8 +46,6 @@ function timeAgo(iso: string): string {
 
 const ALERT_WINDOW_MS = 10 * 60 * 1000;
 
-type TileLayerType = "street" | "satellite" | "terrain";
-
 interface Perimeter {
   id: number;
   name: string;
@@ -54,31 +55,7 @@ interface Perimeter {
   created_at: string;
 }
 
-// ── Spread cone polygon ───────────────────────────────────────────────────────
-function buildSpreadCone(
-  lat: number,
-  lng: number,
-  windDeg: number,
-  windSpeed: number
-): [number, number][] {
-  const baseRadius = 0.02 + windSpeed * 0.001;
-  const elongation = 1 + windSpeed / 30;
-  const points: [number, number][] = [];
-  const steps = 32;
-  const windRad = ((windDeg - 90) * Math.PI) / 180;
-
-  for (let i = 0; i <= steps; i++) {
-    const theta = (i / steps) * 2 * Math.PI;
-    // Ellipse in local coords, major axis along wind direction
-    const ex = Math.cos(theta) * baseRadius * elongation;
-    const ey = Math.sin(theta) * baseRadius;
-    // Rotate by wind direction
-    const rx = ex * Math.cos(windRad) - ey * Math.sin(windRad);
-    const ry = ex * Math.sin(windRad) + ey * Math.cos(windRad);
-    points.push([lat + ry, lng + rx]);
-  }
-  return points;
-}
+type TileLayerType = "street" | "satellite" | "terrain" | "fuel";
 
 // ── Draw mode map events ──────────────────────────────────────────────────────
 function DrawHandler({
@@ -106,6 +83,13 @@ function DrawHandler({
   return points.length >= 2 ? (
     <Polyline positions={points} pathOptions={{ color: "#f47b25", weight: 2, dashArray: "6 4" }} />
   ) : null;
+}
+
+// ── Map controller (zoom + locate) ───────────────────────────────────────────
+function MapController({ onReady }: { onReady: (m: L.Map) => void }) {
+  const map = useMap();
+  useEffect(() => { onReady(map); }, [map, onReady]);
+  return null;
 }
 
 // ── Name dialog ───────────────────────────────────────────────────────────────
@@ -147,6 +131,23 @@ function NameDialog({
   );
 }
 
+interface Isochrone {
+  minutes: number;
+  geojson: { type: string; coordinates: number[][][] };
+}
+
+interface Hotspot {
+  type: string;
+  geometry: { type: string; coordinates: [number, number] };
+  properties: { id: number; brightness: number | null; frp: number | null; confidence: string; satellite: string; acquired_at: string };
+}
+
+interface Incident {
+  id: number; latitude: number; longitude: number; status: string;
+  started_at: string; last_activity_at: string; alert_count: number;
+  max_confidence: number; camera_name: string | null;
+}
+
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [cameras, setCameras] = useState<Camera[]>([]);
@@ -158,12 +159,34 @@ export default function DashboardPage() {
   const [drawPoints, setDrawPoints] = useState<[number, number][]>([]);
   const [pendingPoints, setPendingPoints] = useState<[number, number][] | null>(null);
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
-  const [spreadWeather, setSpreadWeather] = useState<WeatherData | null>(null);
+  const [isochrones, setIsochrones] = useState<Isochrone[]>([]);
+  const [isochroneLoading, setIsochroneLoading] = useState(false);
+  const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const hotspotTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showNotifications, setShowNotifications] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
   const { alerts, prepend } = useAlerts(100);
 
   useEffect(() => {
     void api.cameras().then(setCameras).catch(console.error);
     void api.perimeters().then((p) => setPerimeters(p as Perimeter[])).catch(console.error);
+    // Initial hotspot + incident load
+    void api.hotspots(24).then((fc) => setHotspots(fc.features)).catch(console.error);
+    void api.incidents().then(setIncidents).catch(console.error);
+    // Poll hotspots every 5 min, incidents every 30s
+    hotspotTimer.current = setInterval(() => {
+      void api.hotspots(24).then((fc) => setHotspots(fc.features)).catch(console.error);
+    }, 300_000);
+    const incidentTimer = setInterval(() => {
+      void api.incidents().then(setIncidents).catch(console.error);
+    }, 30_000);
+    return () => {
+      if (hotspotTimer.current) clearInterval(hotspotTimer.current);
+      clearInterval(incidentTimer);
+    };
   }, []);
 
   useWebSocket((raw) => {
@@ -175,10 +198,56 @@ export default function DashboardPage() {
     } catch { /* ignore */ }
   });
 
-  // Load weather when alert selected
+  // Close notification dropdown on outside click
   useEffect(() => {
-    if (!selectedAlert) { setSpreadWeather(null); return; }
-    api.weather(selectedAlert.camera_id).then(setSpreadWeather).catch(() => setSpreadWeather(null));
+    function onOutside(e: MouseEvent) {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setShowNotifications(false);
+      }
+    }
+    document.addEventListener("mousedown", onOutside);
+    return () => document.removeEventListener("mousedown", onOutside);
+  }, []);
+
+  const handleMapReady = useCallback((m: L.Map) => { mapRef.current = m; }, []);
+
+  function zoomIn() { mapRef.current?.zoomIn(); }
+  function zoomOut() { mapRef.current?.zoomOut(); }
+  function locateUser() {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => mapRef.current?.flyTo([pos.coords.latitude, pos.coords.longitude], 13, { duration: 1 }),
+      () => alert("Location access denied"),
+    );
+  }
+
+  // Search: match cameras by name/label and fly to them, or match INC-### to alert
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return;
+    const incMatch = q.match(/^inc-?(\d+)$/);
+    if (incMatch) {
+      const alertId = parseInt(incMatch[1]);
+      navigate(`/alerts/${alertId}`);
+      return;
+    }
+    const cam = cameras.find(
+      (c) => c.name.toLowerCase().includes(q) || (c.location_label ?? "").toLowerCase().includes(q)
+    );
+    if (cam) {
+      mapRef.current?.flyTo([cam.latitude, cam.longitude], 14, { duration: 1 });
+      setSearchQuery("");
+    }
+  }
+
+  // Load Rothermel isochrones when alert selected
+  useEffect(() => {
+    if (!selectedAlert) { setIsochrones([]); return; }
+    setIsochroneLoading(true);
+    api.spread(selectedAlert.camera_id, selectedAlert.id)
+      .then((r) => setIsochrones(r.isochrones))
+      .catch(console.error)
+      .finally(() => setIsochroneLoading(false));
   }, [selectedAlert]);
 
   const recentCameraIds = new Set(
@@ -205,7 +274,7 @@ export default function DashboardPage() {
     alertCountByCamera[a.camera_id] = (alertCountByCamera[a.camera_id] ?? 0) + 1;
   }
 
-  const TILE_URLS: Record<TileLayerType, { url: string; attr: string }> = {
+  const TILE_URLS: Record<Exclude<TileLayerType, "fuel">, { url: string; attr: string }> = {
     street: {
       url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       attr: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a>',
@@ -253,23 +322,22 @@ export default function DashboardPage() {
     setPendingPoints(null);
   }
 
-  // Build spread cone polygon
-  let spreadConePoints: [number, number][] | null = null;
-  if (selectedAlert && spreadWeather) {
-    const cam = cameras.find((c) => c.id === selectedAlert.camera_id);
-    if (cam) {
-      spreadConePoints = buildSpreadCone(
-        cam.latitude,
-        cam.longitude,
-        spreadWeather.wind_deg,
-        spreadWeather.wind_speed
-      );
-    }
-  }
+  // Isochrone colors (30/60/120 min)
+  const ISO_COLORS = ["#ef4444", "#f97316", "#eab308"];
+  const ISO_OPACITY = [0.25, 0.18, 0.10];
 
   return (
     <div className="flex flex-col h-screen bg-background-dark overflow-hidden">
-      <Navbar activeAlerts={activeCount} />
+      <Navbar
+        activeAlerts={activeCount}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onSearchSubmit={handleSearch}
+        unackedAlerts={alerts.filter((a) => !a.acknowledged).slice(0, 15)}
+        showNotifications={showNotifications}
+        onToggleNotifications={() => setShowNotifications((v) => !v)}
+        notifRef={notifRef}
+      />
 
       <div className="flex flex-1 min-h-0">
         {/* ── Sidebar ──────────────────────────────────────── */}
@@ -389,11 +457,26 @@ export default function DashboardPage() {
             style={{ background: "#1A1A24" }}
             doubleClickZoom={!drawMode}
           >
-            <TileLayer
-              key={tileLayer}
-              attribution={TILE_URLS[tileLayer].attr}
-              url={TILE_URLS[tileLayer].url}
-            />
+            <MapController onReady={handleMapReady} />
+            {tileLayer === "fuel" ? (
+              <WMSTileLayer
+                key="fuel"
+                url="https://edcintl.cr.usgs.gov/geoserver/wms"
+                layers="landfire:LF2016_FBFM40_CONUS"
+                styles=""
+                format="image/png"
+                transparent={true}
+                version="1.1.1"
+                attribution='&copy; <a href="https://www.landfire.gov/">LANDFIRE</a> FBFM40 (CONUS 2016)'
+                opacity={0.75}
+              />
+            ) : (
+              <TileLayer
+                key={tileLayer}
+                attribution={TILE_URLS[tileLayer as Exclude<TileLayerType, "fuel">].attr}
+                url={TILE_URLS[tileLayer as Exclude<TileLayerType, "fuel">].url}
+              />
+            )}
 
             {/* Alert density heatmap — below fire markers */}
             {cameras.map((cam) => {
@@ -427,13 +510,75 @@ export default function DashboardPage() {
               );
             })}
 
-            {/* Predictive spread cone */}
-            {spreadConePoints && (
-              <Polygon
-                positions={spreadConePoints}
-                pathOptions={{ color: "#f47b25", fillColor: "rgba(244,123,37,0.2)", fillOpacity: 0.2, weight: 1.5, dashArray: "5 4" }}
-              />
-            )}
+            {/* Rothermel isochrone rings (30 / 60 / 120 min) */}
+            {isochroneLoading && null}
+            {isochrones.map((iso, i) => {
+              const coords = iso.geojson.coordinates[0];
+              const positions: [number, number][] = coords.map(([lng, lat]) => [lat, lng]);
+              return (
+                <Polygon
+                  key={`iso-${iso.minutes}`}
+                  positions={positions}
+                  pathOptions={{
+                    color: ISO_COLORS[i] ?? "#eab308",
+                    fillOpacity: ISO_OPACITY[i] ?? 0.08,
+                    weight: 1.5,
+                    dashArray: "6 4",
+                  }}
+                >
+                  <Tooltip permanent direction="center" className="bg-transparent border-0 shadow-none">
+                    <span className="text-[10px] font-bold text-white bg-black/50 px-1 rounded">
+                      {iso.minutes}m
+                    </span>
+                  </Tooltip>
+                </Polygon>
+              );
+            })}
+
+            {/* NASA FIRMS satellite hotspots */}
+            {hotspots.map((h) => {
+              const [lon, lat] = h.geometry.coordinates;
+              const frp = h.properties.frp ?? 1;
+              const radius = Math.min(Math.max(Math.sqrt(frp) * 2, 5), 25);
+              return (
+                <CircleMarker
+                  key={`hs-${h.properties.id}`}
+                  center={[lat, lon]}
+                  radius={radius}
+                  pathOptions={{ color: "#a855f7", fillColor: "#c084fc", fillOpacity: 0.6, weight: 1 }}
+                >
+                  <Popup>
+                    <div className="text-xs min-w-[160px]">
+                      <p className="font-bold text-purple-700 mb-1">🛰 NASA FIRMS Hotspot</p>
+                      <p>Satellite: {h.properties.satellite}</p>
+                      <p>FRP: {frp.toFixed(1)} MW</p>
+                      <p>Confidence: {h.properties.confidence}</p>
+                      <p className="text-gray-400">{new Date(h.properties.acquired_at).toLocaleString()}</p>
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              );
+            })}
+
+            {/* Incident markers */}
+            {incidents.map((inc) => (
+              <CircleMarker
+                key={`inc-${inc.id}`}
+                center={[inc.latitude, inc.longitude]}
+                radius={10}
+                pathOptions={{ color: "#f43f5e", fillColor: "#f43f5e", fillOpacity: 0.7, weight: 2 }}
+              >
+                <Popup>
+                  <div className="text-xs min-w-[160px]">
+                    <p className="font-bold text-red-600 mb-1">🔥 Incident #{inc.id}</p>
+                    <p>{inc.camera_name ?? `Camera ${inc.id}`}</p>
+                    <p>Alerts: {inc.alert_count}</p>
+                    <p>Max confidence: {(inc.max_confidence * 100).toFixed(1)}%</p>
+                    <p className="text-gray-400 capitalize">{inc.status}</p>
+                  </div>
+                </Popup>
+              </CircleMarker>
+            ))}
 
             {/* Draw handler */}
             <DrawHandler
@@ -491,27 +636,38 @@ export default function DashboardPage() {
           <div className="absolute top-4 right-4 flex flex-col items-end gap-3 z-10">
             {/* Zoom */}
             <div className="flex flex-col gap-px">
-              {["add", "remove"].map((icon, i) => (
-                <button
-                  key={icon}
-                  className={`flex size-10 items-center justify-center bg-ui-dark shadow-lg text-text-dark hover:text-primary transition-colors ${i === 0 ? "rounded-t-lg" : "rounded-b-lg"}`}
-                >
-                  <span className="material-symbols-outlined">{icon}</span>
-                </button>
-              ))}
+              <button
+                onClick={zoomIn}
+                title="Zoom in"
+                className="flex size-10 items-center justify-center bg-ui-dark shadow-lg text-text-dark hover:text-primary transition-colors rounded-t-lg"
+              >
+                <span className="material-symbols-outlined">add</span>
+              </button>
+              <button
+                onClick={zoomOut}
+                title="Zoom out"
+                className="flex size-10 items-center justify-center bg-ui-dark shadow-lg text-text-dark hover:text-primary transition-colors rounded-b-lg"
+              >
+                <span className="material-symbols-outlined">remove</span>
+              </button>
             </div>
 
-            <button className="flex size-10 items-center justify-center rounded-lg bg-ui-dark shadow-lg text-text-dark hover:text-primary transition-colors">
+            <button
+              onClick={locateUser}
+              title="My location"
+              className="flex size-10 items-center justify-center rounded-lg bg-ui-dark shadow-lg text-text-dark hover:text-primary transition-colors"
+            >
               <span className="material-symbols-outlined">my_location</span>
             </button>
 
             {/* Tile layer selector */}
             <div className="flex flex-col rounded-lg overflow-hidden shadow-lg border border-white/10">
-              {(["street", "satellite", "terrain"] as TileLayerType[]).map((t) => {
+              {(["street", "satellite", "terrain", "fuel"] as TileLayerType[]).map((t) => {
                 const icons: Record<TileLayerType, string> = {
                   street: "map",
                   satellite: "satellite_alt",
                   terrain: "terrain",
+                  fuel: "grass",
                 };
                 return (
                   <button
@@ -577,9 +733,31 @@ export default function DashboardPage() {
               <span className="text-xs text-text-dark/80">Alert density</span>
             </div>
             {perimeters.length > 0 && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 mb-1">
                 <span className="size-3 rounded border border-primary bg-primary/15" />
                 <span className="text-xs text-text-dark/80">Fire zones</span>
+              </div>
+            )}
+            {hotspots.length > 0 && (
+              <div className="flex items-center gap-2 mb-1">
+                <span className="size-3 rounded-full bg-purple-400" />
+                <span className="text-xs text-text-dark/80">FIRMS hotspot</span>
+              </div>
+            )}
+            {incidents.length > 0 && (
+              <div className="flex items-center gap-2 mb-1">
+                <span className="size-3 rounded-full bg-rose-500" />
+                <span className="text-xs text-text-dark/80">Active incident</span>
+              </div>
+            )}
+            {isochrones.length > 0 && (
+              <div className="flex flex-col gap-0.5 mt-1">
+                {[{c:"#ef4444",l:"30 min spread"},{c:"#f97316",l:"60 min spread"},{c:"#eab308",l:"120 min spread"}].map(({c,l}) => (
+                  <div key={l} className="flex items-center gap-2">
+                    <span className="size-3 rounded border" style={{borderColor: c, backgroundColor: `${c}33`}} />
+                    <span className="text-xs text-text-dark/80">{l}</span>
+                  </div>
+                ))}
               </div>
             )}
           </div>

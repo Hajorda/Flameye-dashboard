@@ -10,12 +10,17 @@ from fastapi.staticfiles import StaticFiles
 
 from .db.connection import create_pool
 from .redis_listener import listen
+from .firms import run_firms_poller
 from .routers.alerts import router as alerts_router
 from .routers.cameras import router as cameras_router
+from .routers.elevation import router as elevation_router
 from .routers.feed import router as feed_router
 from .routers.health import router as health_router
+from .routers.hotspots import router as hotspots_router
+from .routers.incidents import router as incidents_router
 from .routers.perimeters import router as perimeters_router
 from .routers.reports import router as reports_router
+from .routers.spread import router as spread_router
 from .routers.weather import router as weather_router
 from .ws.manager import ConnectionManager
 
@@ -42,10 +47,14 @@ ws_manager = ConnectionManager()
 
 app.include_router(alerts_router)
 app.include_router(cameras_router)
+app.include_router(elevation_router)
 app.include_router(feed_router)
 app.include_router(health_router)
+app.include_router(hotspots_router)
+app.include_router(incidents_router)
 app.include_router(perimeters_router)
 app.include_router(reports_router)
+app.include_router(spread_router)
 app.include_router(weather_router)
 
 
@@ -54,6 +63,7 @@ async def startup() -> None:
     app.state.db = await create_pool()
     app.state.redis = aioredis.from_url(REDIS_URL)
     asyncio.create_task(listen(REDIS_URL, ["alerts", "camera_status"], ws_manager.broadcast))
+    asyncio.create_task(run_firms_poller(app.state.db))
     logger.info("API server ready — docs at /api/docs")
 
 

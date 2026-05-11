@@ -1,4 +1,5 @@
 import logging
+import math
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,3 +81,54 @@ async def save_alert_atomically(
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
+
+
+async def cluster_alert(db: asyncpg.Pool, alert_id: int, camera_id: int, lat: float, lon: float, confidence: float) -> None:
+    """
+    Associate a new alert with an existing nearby incident, or create a new one.
+    Uses Haversine SQL — no PostGIS required.
+    """
+    incident_id = await db.fetchval(
+        """
+        SELECT id FROM incidents
+        WHERE status = 'active'
+          AND last_activity_at > NOW() - INTERVAL '2 hours'
+          AND 2 * 6371 * asin(sqrt(
+                power(sin(radians((latitude  - $1) / 2)), 2) +
+                cos(radians($1)) * cos(radians(latitude)) *
+                power(sin(radians((longitude - $2) / 2)), 2)
+              )) < 5
+        ORDER BY last_activity_at DESC
+        LIMIT 1
+        """,
+        lat, lon,
+    )
+
+    if incident_id:
+        await db.execute(
+            """
+            UPDATE incidents
+            SET last_activity_at = NOW(),
+                alert_count = alert_count + 1,
+                max_confidence = GREATEST(max_confidence, $2)
+            WHERE id = $1
+            """,
+            incident_id, confidence,
+        )
+    else:
+        incident_id = await db.fetchval(
+            """
+            INSERT INTO incidents
+                (first_alert_id, first_camera_id, latitude, longitude,
+                 started_at, last_activity_at, alert_count, max_confidence)
+            VALUES ($1, $2, $3, $4, NOW(), NOW(), 1, $5)
+            RETURNING id
+            """,
+            alert_id, camera_id, lat, lon, confidence,
+        )
+
+    await db.execute(
+        "UPDATE alerts SET incident_id = $1 WHERE id = $2",
+        incident_id, alert_id,
+    )
+    logger.info("Alert %d → incident %d", alert_id, incident_id)

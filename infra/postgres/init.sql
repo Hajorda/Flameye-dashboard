@@ -55,6 +55,38 @@ CREATE TABLE IF NOT EXISTS fire_perimeters (
 );
 CREATE INDEX IF NOT EXISTS idx_perimeters_active ON fire_perimeters(active);
 
+-- Incident clustering
+CREATE TABLE IF NOT EXISTS incidents (
+    id               SERIAL PRIMARY KEY,
+    first_alert_id   INTEGER REFERENCES alerts(id) ON DELETE SET NULL,
+    first_camera_id  INTEGER REFERENCES cameras(id) ON DELETE SET NULL,
+    latitude         DOUBLE PRECISION NOT NULL,
+    longitude        DOUBLE PRECISION NOT NULL,
+    status           TEXT DEFAULT 'active',      -- active | contained | resolved
+    started_at       TIMESTAMPTZ NOT NULL,
+    last_activity_at TIMESTAMPTZ NOT NULL,
+    alert_count      INTEGER DEFAULT 1,
+    max_confidence   FLOAT DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_active ON incidents(status, last_activity_at DESC);
+
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS incident_id INTEGER REFERENCES incidents(id) ON DELETE SET NULL;
+
+-- NASA FIRMS satellite hotspots
+CREATE TABLE IF NOT EXISTS satellite_hotspots (
+    id           SERIAL PRIMARY KEY,
+    latitude     DOUBLE PRECISION NOT NULL,
+    longitude    DOUBLE PRECISION NOT NULL,
+    brightness   FLOAT,
+    frp          FLOAT,
+    confidence   TEXT,
+    satellite    TEXT,
+    acquired_at  TIMESTAMPTZ NOT NULL,
+    created_at   TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (latitude, longitude, acquired_at)
+);
+CREATE INDEX IF NOT EXISTS idx_hotspots_acquired ON satellite_hotspots(acquired_at DESC);
+
 -- Seed camera for local testing (YouTube stream)
 -- Update rtsp_url, latitude, longitude as needed.
 INSERT INTO cameras (name, rtsp_url, latitude, longitude, location_label)

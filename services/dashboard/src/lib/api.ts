@@ -158,6 +158,43 @@ export const api = {
   reportsByHour: (): Promise<Array<{hour: number; count: number}>> =>
     get('/api/reports/by-hour'),
 
+  // ── Fire spread (Rothermel isochrones) ───────────────────────────────────────
+  spread: async (cameraId: number, alertId?: number, moisturePct = 8): Promise<{
+    center: {lat: number; lon: number};
+    fuel_model: string;
+    wind_speed_mps: number;
+    wind_deg: number;
+    slope_deg: number;
+    aspect_deg: number;
+    moisture_pct: number;
+    isochrones: Array<{minutes: number; geojson: {type: string; coordinates: number[][][]}}>;
+  }> => {
+    const res = await fetch(`${BASE}/api/spread`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({camera_id: cameraId, alert_id: alertId, moisture_pct: moisturePct}),
+    });
+    if (!res.ok) throw new Error(`Spread failed: ${res.status}`);
+    return res.json();
+  },
+
+  // ── Incidents ─────────────────────────────────────────────────────────────────
+  incidents: (status = 'active'): Promise<Array<{
+    id: number; latitude: number; longitude: number; status: string;
+    started_at: string; last_activity_at: string; alert_count: number;
+    max_confidence: number; camera_name: string | null;
+  }>> => get(`/api/incidents?status=${status}`),
+
+  // ── Satellite hotspots ────────────────────────────────────────────────────────
+  hotspots: (hours = 24): Promise<{type: string; features: Array<{
+    type: string; geometry: {type: string; coordinates: [number, number]};
+    properties: {id: number; brightness: number | null; frp: number | null; confidence: string; satellite: string; acquired_at: string};
+  }>}> => get(`/api/hotspots?hours=${hours}`),
+
+  // ── Elevation / slope ────────────────────────────────────────────────────────
+  elevation: (lat: number, lon: number): Promise<{elevation_m: number; slope_deg: number; aspect_deg: number}> =>
+    get(`/api/geo/elevation?lat=${lat}&lon=${lon}`),
+
   // ── Weather ──────────────────────────────────────────────────────────────────
   weather: (cameraId: number): Promise<{temp: number; humidity: number; wind_speed: number; wind_deg: number; description: string; icon: string}> =>
     get(`/api/weather/${cameraId}`),

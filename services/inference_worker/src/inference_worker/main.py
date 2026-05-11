@@ -12,7 +12,7 @@ from .consumer import ack_frame, ensure_consumer_group, read_next_frame
 from .detector import FireDetector
 from .motion import has_motion
 from .notify import send_telegram_alert
-from .storage import cleanup_tmp_files, save_alert_atomically
+from .storage import cleanup_tmp_files, cluster_alert, save_alert_atomically
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,8 +35,8 @@ ALERT_CLASSES: set[str] = set(
 
 
 async def _fetch_active_cameras(db: asyncpg.Pool) -> list[dict]:
-    rows = await db.fetch("SELECT id, name FROM cameras WHERE active = TRUE ORDER BY id")
-    return [{"id": r["id"], "name": r["name"]} for r in rows]
+    rows = await db.fetch("SELECT id, name, latitude, longitude FROM cameras WHERE active = TRUE ORDER BY id")
+    return [{"id": r["id"], "name": r["name"], "latitude": r["latitude"], "longitude": r["longitude"]} for r in rows]
 
 
 async def run_camera(
@@ -47,6 +47,8 @@ async def run_camera(
     stop_event: asyncio.Event,
 ) -> None:
     camera_id: int = camera["id"]
+    cam_lat: float = camera.get("latitude", 0.0)
+    cam_lon: float = camera.get("longitude", 0.0)
     stream_key = f"frames:{camera_id}"
     last_alert_key = f"last_alert:{camera_id}"
 
@@ -94,6 +96,12 @@ async def run_camera(
                 best["confidence"], best["bbox"],
                 class_name=best.get("class_name", "fire"),
             )
+
+            # Cluster into incident (best-effort, don't fail alert on error)
+            try:
+                await cluster_alert(db, alert["id"], camera_id, cam_lat, cam_lon, best["confidence"])
+            except Exception as exc:
+                logger.warning("Incident clustering failed for alert %d: %s", alert["id"], exc)
 
             await asyncio.to_thread(r.setex, last_alert_key, ALERT_COOLDOWN, "1")
             await asyncio.to_thread(r.publish, "alerts", json.dumps(alert))
